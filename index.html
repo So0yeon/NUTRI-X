@@ -433,7 +433,7 @@ const FOODS = [
 const FOOD_BY_ID = {}; FOODS.forEach(f=>FOOD_BY_ID[f.id]=f);
 
 /* 하루 목표치 (100% 기준) */
-const TARGET = {c:22, p:20, f:11, v:24, m:20, w:22};
+const TARGET = {c:30, p:28, f:13, v:30, m:26, w:30};
 
 /* 시민 의뢰 (10개 이상) */
 const CITIZENS = [
@@ -551,28 +551,36 @@ function dietTotals(diet){
   return t;
 }
 // 영양소 충족도 점수 (목표 대비, 80~135%면 만점, 부족/과잉 감점)
-function nutrientScore(total,target){
+function nutrientScore(total,target,key){
   if(target<=0) return 100;
   const r=total/target;
-  if(r>=0.8 && r<=1.35) return 100;
-  if(r<0.8) return Math.max(0, Math.round(r/0.8*100));
-  // 과잉
-  return Math.max(35, Math.round(100 - (r-1.35)*70));
+  if(key==='f'){
+    // 지방: 적당히 먹으면 만점, 너무 많이 먹으면 감점
+    if(r>=0.55 && r<=1.4) return 100;
+    if(r<0.55) return Math.max(0, Math.round(r/0.55*100));
+    return Math.max(35, Math.round(100-(r-1.4)*55));
+  }
+  // 그 외 영양소: 충분히(70% 이상) 먹으면 만점, 좀 넘쳐도 감점 거의 없음
+  if(r>=0.7){
+    if(r<=2.0) return 100;                                  // 70%~200%는 만점
+    return Math.max(70, Math.round(100-(r-2.0)*20));        // 200% 초과부터 약하게만 감점
+  }
+  return Math.max(0, Math.round(r/0.7*100));
 }
 function pctOf(total,target){ return Math.round(total/target*100); }
 
 function evalDiet(diet, citizen){
   const t=dietTotals(diet);
   // 6 nutrient scores
-  const ns={}; NKEYS.forEach(k=> ns[k]=nutrientScore(t[k],TARGET[k]) );
+  const ns={}; NKEYS.forEach(k=> ns[k]=nutrientScore(t[k],TARGET[k],k) );
   // 3 function scores
   const energyVal=t.c + t.f*1.3, energyTar=TARGET.c + TARGET.f*1.3;
   const buildVal=t.p*1.4 + t.m*0.6, buildTar=TARGET.p*1.4 + TARGET.m*0.6;
   const regVal=t.v + t.m*0.4 + t.w*0.6, regTar=TARGET.v + TARGET.m*0.4 + TARGET.w*0.6;
   const fs={
-    energy:nutrientScore(energyVal,energyTar),
-    build:nutrientScore(buildVal,buildTar),
-    reg:nutrientScore(regVal,regTar),
+    energy:nutrientScore(energyVal,energyTar,'energy'),
+    build:nutrientScore(buildVal,buildTar,'build'),
+    reg:nutrientScore(regVal,regTar,'reg'),
   };
   // variety: 몇 개 식품군 사용?
   const groupsUsed=new Set();
@@ -613,6 +621,12 @@ function evalDiet(diet, citizen){
   }
   // 변형/분산 소폭 보너스(편식 방지)
   score = score*0.9 + varietyScore*0.1;
+  // 과식 억제: 영양소 평균이 크게 넘치면 소폭 감점(폭식 방지)
+  const avgRatio = NKEYS.reduce((a,k)=>a+t[k]/TARGET[k],0)/NKEYS.length;
+  if(avgRatio>1.6) score -= Math.min(18, (avgRatio-1.6)*45);
+  // 편식 감점: 어떤 영양소가 너무 부족(30% 미만)하면 식품군이 빠진 것
+  const starved = NKEYS.filter(k=>t[k]/TARGET[k]<0.3).length;
+  if(starved>=1) score -= starved*8;
   // 빈 끼니 규칙: 한 끼라도 거르면 구조 성공 불가(48점 이하로 제한)
   if(emptyMeals>=1) score=Math.min(score,48);
   if(totalItems<4) score=Math.min(score,55);
